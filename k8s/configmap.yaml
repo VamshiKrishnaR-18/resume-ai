@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  OPENAI_API_KEY: "dummy"
+  ANTHROPIC_API_KEY: "dummy"

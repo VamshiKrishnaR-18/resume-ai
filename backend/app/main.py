@@ -19,7 +19,7 @@ from .routers import (
 models.Base.metadata.create_all(bind=engine)
 run_migrations()
 
-app = FastAPI(title="AI Resume Tailor API", version="1.1.0")
+app = FastAPI(title="AI Resume Tailor API", version="1.1.0", root_path="/api")
 
 # Local dev origins are always allowed. Add your deployed frontend origin
 # (e.g. your Elastic Beanstalk / CloudFront / Vercel URL) via the
@@ -39,15 +39,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router.router)
-app.include_router(resumes.router)
-app.include_router(versions.router)
-app.include_router(export.router)
-app.include_router(history.router)
-app.include_router(settings.router)
-app.include_router(dashboard.router)
-app.include_router(admin.router)
+API_PREFIX = "/api"
 
+app.include_router(auth_router.router, prefix=API_PREFIX)
+app.include_router(resumes.router, prefix=API_PREFIX)
+app.include_router(versions.router, prefix=API_PREFIX)
+app.include_router(export.router, prefix=API_PREFIX)
+app.include_router(history.router, prefix=API_PREFIX)
+app.include_router(settings.router, prefix=API_PREFIX)
+app.include_router(dashboard.router, prefix=API_PREFIX)
+app.include_router(admin.router, prefix=API_PREFIX)
 
 @app.get("/")
 def health_check():
