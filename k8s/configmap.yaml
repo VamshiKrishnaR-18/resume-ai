@@ -3,5 +3,4 @@ kind: ConfigMap
 metadata:
   name: app-config
 data:
-  OPENAI_API_KEY: "dummy"
-  ANTHROPIC_API_KEY: "dummy"
+  VITE_API_BASE_URL: "/api"

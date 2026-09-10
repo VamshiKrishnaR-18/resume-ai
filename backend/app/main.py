@@ -19,7 +19,7 @@ from .routers import (
 models.Base.metadata.create_all(bind=engine)
 run_migrations()
 
-app = FastAPI(title="AI Resume Tailor API", version="1.1.0", root_path="/api")
+app = FastAPI(title="AI Resume Tailor API", version="1.1.0")
 
 # Local dev origins are always allowed. Add your deployed frontend origin
 # (e.g. your Elastic Beanstalk / CloudFront / Vercel URL) via the
