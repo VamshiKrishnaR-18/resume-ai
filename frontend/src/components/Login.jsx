@@ -15,7 +15,10 @@ export default function Login({ onAuthenticated }) {
     setBusy(true);
     try {
       const result =
-        mode === "login" ? await api.login(username, password) : await api.register(username, password);
+        mode === "login" 
+          ? await api.login(username, password) 
+          : await api.register(username, password);
+          
       localStorage.setItem("access_token", result.access_token);
       localStorage.setItem("user", JSON.stringify(result.user));
       onAuthenticated(result.user);
@@ -31,14 +34,35 @@ export default function Login({ onAuthenticated }) {
       <div className="auth-left">
         <div className="auth-logo">
           <span className="logo-badge">R</span>
-          Resume AI
+          <span>Resume AI</span>
         </div>
-        <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>
-        <p className="auth-subtitle">
-          {mode === "login"
-            ? "Sign in to tailor a resume to any job in seconds."
-            : "Set up an account to start generating tailored, ATS-friendly resumes."}
-        </p>
+
+        {/* Mode Segmented Tab Switcher */}
+        <div className="auth-mode-tabs">
+          <button 
+            type="button" 
+            className={`auth-tab ${mode === "login" ? "active" : ""}`}
+            onClick={() => { setMode("login"); setError(""); }}
+          >
+            Sign In
+          </button>
+          <button 
+            type="button" 
+            className={`auth-tab ${mode === "register" ? "active" : ""}`}
+            onClick={() => { setMode("register"); setError(""); }}
+          >
+            Create Account
+          </button>
+        </div>
+
+        <div className="auth-header-block">
+          <h1>{mode === "login" ? "Welcome back" : "Get started for free"}</h1>
+          <p className="auth-subtitle">
+            {mode === "login"
+              ? "Access your tailored resumes and analytics."
+              : "Set up your workspace to tailor resumes using Groq & Gemini."}
+          </p>
+        </div>
 
         {error && <div className="error-banner">{error}</div>}
 
@@ -48,7 +72,7 @@ export default function Login({ onAuthenticated }) {
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g. roshanadmin"
+              placeholder="e.g. vamshikrishna"
               autoComplete="username"
               required
             />
@@ -65,57 +89,40 @@ export default function Login({ onAuthenticated }) {
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 required
               />
-              <button type="button" className="btn-link" onClick={() => setShowPassword((s) => !s)}>
+              <button type="button" className="btn-link show-pwd-btn" onClick={() => setShowPassword((s) => !s)}>
                 {showPassword ? "Hide" : "Show"}
               </button>
             </div>
           </label>
 
           <button className="btn-primary btn-block" type="submit" disabled={busy}>
-            {busy ? "Please wait..." : mode === "login" ? "Sign in" : "Create account"}
+            {busy ? "Processing..." : mode === "login" ? "Sign In" : "Create Account"}
           </button>
         </form>
-
-        <div className="auth-switch">
-          {mode === "login" ? (
-            <>
-              Don&apos;t have an account?{" "}
-              <button className="btn-link" onClick={() => setMode("register")}>
-                Sign up
-              </button>
-            </>
-          ) : (
-            <>
-              Already have an account?{" "}
-              <button className="btn-link" onClick={() => setMode("login")}>
-                Sign in
-              </button>
-            </>
-          )}
-        </div>
       </div>
 
       <div className="auth-right">
-        <span className="auth-pill">✨ AI-tailored resumes</span>
-        <h2>Turn one resume into the exact fit for every job you apply to.</h2>
-        <p>
-          Paste a job description, pick Claude or OpenAI, and get a tailored, ATS-scored resume in
-          seconds - with export to PDF and DOCX.
-        </p>
-        <ul className="auth-features">
-          <li>
-            <strong>Claude &amp; OpenAI, side by side</strong>
-            <span>Generate with either model and compare results.</span>
-          </li>
-          <li>
-            <strong>Built-in ATS scoring</strong>
-            <span>See matched and missing keywords for every tailored version.</span>
-          </li>
-          <li>
-            <strong>Templates &amp; formatting</strong>
-            <span>Six layouts, custom fonts, section order, and one-click export.</span>
-          </li>
-        </ul>
+        <div className="auth-right-content">
+          <span className="auth-pill">✨ Next-Gen Career Suite</span>
+          <h2>Optimize your applications with precision AI intelligence.</h2>
+          <p>
+            Instantly ingest PDF or Word resumes, match job descriptions via Groq or Gemini, and export cleanly formatted layouts in seconds.
+          </p>
+          <ul className="auth-features">
+            <li>
+              <strong>Instant File Extraction</strong>
+              <span>Upload PDF/DOCX resumes natively without manual text copying.</span>
+            </li>
+            <li>
+              <strong>Real-Time LLM Streaming</strong>
+              <span>Watch your tailored resume build word-by-word with live ATS keyword matching.</span>
+            </li>
+            <li>
+              <strong>Professional Templates</strong>
+              <span>Choose from multiple custom layouts with full typography and margin controls.</span>
+            </li>
+          </ul>
+        </div>
       </div>
     </div>
   );
