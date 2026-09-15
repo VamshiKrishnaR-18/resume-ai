@@ -25,7 +25,8 @@ export default function ResumeApp() {
   const [jobTitle, setJobTitle] = useState("");
   const [jobLocation, setJobLocation] = useState("");
   const [jobDescription, setJobDescription] = useState("");
-  const [model, setModel] = useState("openai");
+  // Default to groq now instead of openai
+  const [model, setModel] = useState("groq"); 
 
   const [settingsState, setSettingsState] = useState(null);
   const [version, setVersion] = useState(null);
@@ -367,17 +368,18 @@ export default function ResumeApp() {
           <div className="model-row">
             <span className="model-label">MODEL</span>
             <div className="model-toggle">
+              {/* Updated toggle buttons for Groq and Gemini */}
               <button
-                className={`model-btn ${model === "claude" ? "active" : ""}`}
-                onClick={() => setModel("claude")}
+                className={`model-btn ${model === "groq" ? "active" : ""}`}
+                onClick={() => setModel("groq")}
               >
-                ◎ Claude
+                ⚡ Groq
               </button>
               <button
-                className={`model-btn ${model === "openai" ? "active" : ""}`}
-                onClick={() => setModel("openai")}
+                className={`model-btn ${model === "gemini" ? "active" : ""}`}
+                onClick={() => setModel("gemini")}
               >
-                ● OpenAI
+                ✨ Gemini
               </button>
             </div>
           </div>
