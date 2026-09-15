@@ -37,7 +37,13 @@ export default function NewResumeModal({
       formData.append("file", file);
 
       try {
-        const token = localStorage.getItem("token"); // Assumes your app uses this token key
+        const token = localStorage.getItem("token") || localStorage.getItem("access_token") || localStorage.getItem("jwt");
+        if (!token) {
+           alert("You must be logged in to upload files.");
+           setUploading(false);
+           return;
+        }
+        
         const response = await fetch("/api/resumes/extract", {
           method: "POST",
           headers: {
