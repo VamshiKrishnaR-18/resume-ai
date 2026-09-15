@@ -124,7 +124,7 @@ def generate_version(
         finally:
             stream_db.close()
 
-    return StreamingResponse(stream_and_store(), media_type="text/plain")
+    return StreamingResponse(stream_and_store(), media_type="text/plain", headers={"X-Accel-Buffering": "no"})
 
 
 # -----------------------------

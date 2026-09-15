@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import { useResumeGenerator } from "../hooks/useResumeGenerator.js";
+
 import JobPanel from "./JobPanel.jsx";
 import ResultPanel from "./ResultPanel.jsx";
 import SettingsPanel from "./SettingsPanel.jsx";
@@ -19,34 +20,47 @@ const PAGE_SIZES = ["A4", "Letter"];
 const MIN_JD_LENGTH = 250;
 
 export default function ResumeApp() {
-  // Global & Base Resume State
+
+  // -----------------------------
+  // GLOBAL STATE
+  // -----------------------------
   const [resumes, setResumes] = useState([]);
   const [selectedResumeId, setSelectedResumeId] = useState(null);
-  const [picking, setPicking] = useState(false);
-  const [editingLevel, setEditingLevel] = useState(false);
+
   const [error, setError] = useState("");
   const [copyLabel, setCopyLabel] = useState("Copy");
+
+  const [picking, setPicking] = useState(false);
+  const [showNewResume, setShowNewResume] = useState(false);
+  const [editingLevel, setEditingLevel] = useState(false);
+
   const [settingsState, setSettingsState] = useState(null);
 
-  // New Resume Modal State
-  const [showNewResume, setShowNewResume] = useState(false);
+  // -----------------------------
+  // NEW RESUME STATE
+  // -----------------------------
   const [newTitle, setNewTitle] = useState("");
   const [newContent, setNewContent] = useState("");
   const [newLevel, setNewLevel] = useState(EXPERIENCE_LEVELS[1]);
 
-  // Job Details State
+  // -----------------------------
+  // JOB INPUT STATE
+  // -----------------------------
   const [companyName, setCompanyName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [jobLocation, setJobLocation] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [model, setModel] = useState("groq");
+
   const jdRef = useRef(null);
   const jdLength = jobDescription.trim().length;
   const jdReady = jdLength >= MIN_JD_LENGTH;
 
-  const selectedResume = resumes.find((r) => r.id === selectedResumeId) || null;
+  const selectedResume = resumes.find(r => r.id === selectedResumeId) || null;
 
-  // Custom AI Hook
+  // -----------------------------
+  // AI GENERATION HOOK
+  // -----------------------------
   const {
     version,
     setVersion,
@@ -68,6 +82,9 @@ export default function ResumeApp() {
     setError,
   });
 
+  // -----------------------------
+  // INITIAL LOAD
+  // -----------------------------
   useEffect(() => {
     loadResumes();
     api.getSettings().then(setSettingsState).catch(() => {});
@@ -77,6 +94,7 @@ export default function ResumeApp() {
     try {
       const list = await api.listResumes();
       setResumes(list);
+
       if (list.length) {
         setSelectedResumeId(selectId || list[0].id);
       } else {
@@ -87,14 +105,40 @@ export default function ResumeApp() {
     }
   }
 
+  // -----------------------------
+  // RESUME CRUD
+  // -----------------------------
   async function handleCreateResume() {
     if (!newContent.trim()) return;
+
     try {
-      const created = await api.createResume(newTitle || "My Resume", newContent, newLevel);
+      const created = await api.createResume(
+        newTitle || "My Resume",
+        newContent,
+        newLevel
+      );
+
       setShowNewResume(false);
       setNewTitle("");
       setNewContent("");
+
       await loadResumes(created.id);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function handleDeleteResume(id) {
+    if (!confirm("Delete this resume and all its versions?")) return;
+
+    try {
+      await api.deleteResume(id);
+
+      const remaining = resumes.filter(r => r.id !== id);
+      setResumes(remaining);
+      setSelectedResumeId(remaining[0]?.id || null);
+
+      if (!remaining.length) setShowNewResume(true);
     } catch (err) {
       setError(err.message);
     }
@@ -102,6 +146,7 @@ export default function ResumeApp() {
 
   async function handleLevelChange(level) {
     if (!selectedResume) return;
+
     try {
       const updated = await api.updateResume(
         selectedResume.id,
@@ -109,7 +154,10 @@ export default function ResumeApp() {
         selectedResume.content,
         level
       );
-      setResumes((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+
+      setResumes(prev =>
+        prev.map(r => (r.id === updated.id ? updated : r))
+      );
     } catch (err) {
       setError(err.message);
     } finally {
@@ -117,19 +165,9 @@ export default function ResumeApp() {
     }
   }
 
-  async function handleDeleteResume(id) {
-    if (!confirm("Delete this resume and all its tailored versions?")) return;
-    try {
-      await api.deleteResume(id);
-      const remaining = resumes.filter((r) => r.id !== id);
-      setResumes(remaining);
-      setSelectedResumeId(remaining[0]?.id || null);
-      if (!remaining.length) setShowNewResume(true);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
+  // -----------------------------
+  // UX HELPERS
+  // -----------------------------
   function handleJdKeyDown(e) {
     if (e.ctrlKey && e.key === "Enter") {
       e.preventDefault();
@@ -137,8 +175,13 @@ export default function ResumeApp() {
     }
   }
 
+  function updateSetting(patch) {
+    setSettingsState(prev => ({ ...prev, ...patch }));
+  }
+
   async function persistSettingsForExport() {
     if (!settingsState) return settingsState;
+
     try {
       const saved = await api.updateSettings(settingsState);
       setSettingsState(saved);
@@ -148,74 +191,76 @@ export default function ResumeApp() {
     }
   }
 
-  function updateSetting(patch) {
-    setSettingsState((prev) => ({ ...prev, ...patch }));
-  }
-
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(editedContent);
+      setCopyLabel("Copied!");
     } catch {
-      alert("Copy failed (browser restriction)");
+      alert("Copy failed");
     }
-    setCopyLabel("Copied!");
+
     setTimeout(() => setCopyLabel("Copy"), 1500);
   }
 
-  async function handleExport(kind) {
+  async function handleExport(type) {
     if (!version) return;
+
     await persistSettingsForExport();
+
     try {
-      if (kind === "pdf") await api.exportVersionPdf(version.id);
+      if (type === "pdf") await api.exportVersionPdf(version.id);
       else await api.exportVersionDocx(version.id);
     } catch (err) {
       setError(err.message);
     }
   }
 
+  // -----------------------------
+  // KEYWORD PARSING
+  // -----------------------------
   const matchedArr = typeof version?.matched_keywords === "string"
-    ? version.matched_keywords.split(",").map((k) => k.trim()).filter(Boolean)
+    ? version.matched_keywords.split(",").map(k => k.trim()).filter(Boolean)
     : version?.matched_keywords || [];
 
   const missingArr = typeof version?.missing_keywords === "string"
-    ? version.missing_keywords.split(",").map((k) => k.trim()).filter(Boolean)
+    ? version.missing_keywords.split(",").map(k => k.trim()).filter(Boolean)
     : version?.missing_keywords || [];
 
+  // -----------------------------
+  // UI
+  // -----------------------------
   return (
     <div>
+
+      {/* TOP BAR */}
       <div className="resume-picker-row">
+
+        {/* Experience */}
         {editingLevel ? (
           <select
-            className="resume-picker"
             autoFocus
+            className="resume-picker"
             value={selectedResume?.experience_level || EXPERIENCE_LEVELS[1]}
             onChange={(e) => handleLevelChange(e.target.value)}
             onBlur={() => setEditingLevel(false)}
           >
-            {EXPERIENCE_LEVELS.map((lvl) => (
+            {EXPERIENCE_LEVELS.map(lvl => (
               <option key={lvl}>{lvl}</option>
             ))}
           </select>
         ) : (
           <span className="experience-pill">
-            {selectedResume?.experience_level || "Mid Level (3-5 yrs)"}
+            {selectedResume?.experience_level || EXPERIENCE_LEVELS[1]}
           </span>
         )}
-        {selectedResume && (
-          <button
-            className="icon-btn"
-            title="Edit experience level"
-            onClick={() => setEditingLevel(true)}
-          >
-            ✎
-          </button>
-        )}
+
+        <button className="icon-btn" onClick={() => setEditingLevel(true)}>✎</button>
 
         <div className="picker-spacer" />
 
-        <button className="icon-btn" title="Manage resumes" onClick={() => setPicking(true)}>
-          👥
-        </button>
+        {/* Resume Picker */}
+        <button className="icon-btn" onClick={() => setPicking(true)}>👥</button>
+
         <select
           className="resume-picker"
           value={selectedResumeId || ""}
@@ -224,16 +269,15 @@ export default function ResumeApp() {
             setVersion(null);
           }}
         >
-          {resumes.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.title}
-            </option>
+          {resumes.map(r => (
+            <option key={r.id} value={r.id}>{r.title}</option>
           ))}
         </select>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
+      {/* MODALS */}
       <ResumeManagerModal
         picking={picking}
         setPicking={setPicking}
@@ -258,51 +302,64 @@ export default function ResumeApp() {
         EXPERIENCE_LEVELS={EXPERIENCE_LEVELS}
       />
 
-      <div className="three-col-layout">
-        <JobPanel
-          companyName={companyName}
-          setCompanyName={setCompanyName}
-          jobTitle={jobTitle}
-          setJobTitle={setJobTitle}
-          jobLocation={jobLocation}
-          setJobLocation={setJobLocation}
-          jobDescription={jobDescription}
-          setJobDescription={setJobDescription}
-          jdRef={jdRef}
-          handleJdKeyDown={handleJdKeyDown}
-          jdReady={jdReady}
-          jdLength={jdLength}
-          MIN_JD_LENGTH={MIN_JD_LENGTH}
-          model={model}
-          setModel={setModel}
-          selectedResume={selectedResume}
-          generating={generating}
-          handleGenerate={handleGenerate}
-        />
+      {/* ✅ CLEAN 2-COLUMN LAYOUT */}
+      <div className="resume-app-layout">
 
-        <SettingsPanel
-          settingsState={settingsState}
-          updateSetting={updateSetting}
-          FONT_FAMILIES={FONT_FAMILIES}
-          PAGE_SIZES={PAGE_SIZES}
-        />
+        {/* LEFT: INPUT + SETTINGS */}
+        <div>
+          <div className="panel-pane">
+            <JobPanel
+              companyName={companyName}
+              setCompanyName={setCompanyName}
+              jobTitle={jobTitle}
+              setJobTitle={setJobTitle}
+              jobLocation={jobLocation}
+              setJobLocation={setJobLocation}
+              jobDescription={jobDescription}
+              setJobDescription={setJobDescription}
+              jdRef={jdRef}
+              handleJdKeyDown={handleJdKeyDown}
+              jdReady={jdReady}
+              jdLength={jdLength}
+              MIN_JD_LENGTH={MIN_JD_LENGTH}
+              model={model}
+              setModel={setModel}
+              selectedResume={selectedResume}
+              generating={generating}
+              handleGenerate={handleGenerate}
+            />
+          </div>
 
-        <ResultPanel
-          version={version}
-          setVersion={setVersion}
-          generating={generating}
-          editMode={editMode}
-          setEditMode={setEditMode}
-          handleRetry={handleRetry}
-          handleCopy={handleCopy}
-          copyLabel={copyLabel}
-          handleExport={handleExport}
-          editedContent={editedContent}
-          setEditedContent={setEditedContent}
-          settingsState={settingsState}
-          matchedArr={matchedArr}
-          missingArr={missingArr}
-        />
+          <div className="panel-pane" style={{ marginTop: 20 }}>
+            <SettingsPanel
+              settingsState={settingsState}
+              updateSetting={updateSetting}
+              FONT_FAMILIES={FONT_FAMILIES}
+              PAGE_SIZES={PAGE_SIZES}
+            />
+          </div>
+        </div>
+
+        {/* RIGHT: RESULT */}
+        <div className="panel-pane preview-pane">
+          <ResultPanel
+            version={version}
+            setVersion={setVersion}
+            generating={generating}
+            editMode={editMode}
+            setEditMode={setEditMode}
+            handleRetry={handleRetry}
+            handleCopy={handleCopy}
+            copyLabel={copyLabel}
+            handleExport={handleExport}
+            editedContent={editedContent}
+            setEditedContent={setEditedContent}
+            settingsState={settingsState}
+            matchedArr={matchedArr}
+            missingArr={missingArr}
+          />
+        </div>
+
       </div>
     </div>
   );
