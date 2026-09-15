@@ -1,70 +1,67 @@
 import React from "react";
-import SectionOrderList from "./SectionOrderList.jsx";
-import TemplateGrid from "./TemplateGrid.jsx";
 
-export default function SettingsPanel({
-  settingsState,
-  updateSetting,
-  FONT_FAMILIES,
-  PAGE_SIZES,
+export default function NewResumeModal({
+  showNewResume,
+  setShowNewResume,
+  resumes,
+  newTitle,
+  setNewTitle,
+  newLevel,
+  setNewLevel,
+  newContent,
+  setNewContent,
+  handleCreateResume,
+  EXPERIENCE_LEVELS,
 }) {
-  if (!settingsState) return null;
+  if (!showNewResume) return null;
 
   return (
-    <div className="panel formatting-panel">
-      <h2 style={{ fontSize: 15, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        Section Order
-      </h2>
-      <SectionOrderList
-        sections={settingsState.section_order}
-        onChange={(order) => updateSetting({ section_order: order })}
-      />
-
-      <h2 className="subheading" style={{ fontSize: 15, textTransform: "uppercase" }}>
-        Template
-      </h2>
-      <TemplateGrid
-        value={settingsState.template}
-        onChange={(template) => updateSetting({ template })}
-      />
-
-      <label className="field subheading">
-        <span>Font Family</span>
-        <select
-          value={settingsState.font_family}
-          onChange={(e) => updateSetting({ font_family: e.target.value })}
-        >
-          {FONT_FAMILIES.map((f) => (
-            <option key={f}>{f}</option>
-          ))}
-        </select>
-      </label>
-
-      <label className="field">
-        <span>Font Size</span>
-        <div className="font-size-row">
+    <div className="modal-overlay">
+      <div className="modal-content">
+        {resumes.length > 0 && (
+          <button className="btn-link modal-close" type="button" onClick={() => setShowNewResume(false)}>
+            ✕
+          </button>
+        )}
+        <h2>Add your resume</h2>
+        <p className="muted">
+          Paste your current resume text below. The AI only ever uses information already here -
+          it never invents employers, dates, or skills.
+        </p>
+        <label className="field">
+          <span>Title</span>
           <input
-            type="range"
-            min={9}
-            max={14}
-            value={settingsState.font_size}
-            onChange={(e) => updateSetting({ font_size: Number(e.target.value) })}
+            value={newTitle}
+            onChange={(e) => setNewTitle(e.target.value)}
+            placeholder="e.g. Mani Vaibhav Ruhanth Koliparthi - Data Engineer"
           />
-          <span className="muted">{settingsState.font_size}pt</span>
-        </div>
-      </label>
-
-      <label className="field">
-        <span>Page Size</span>
-        <select
-          value={settingsState.page_size}
-          onChange={(e) => updateSetting({ page_size: e.target.value })}
+        </label>
+        <label className="field">
+          <span>Experience level</span>
+          <select value={newLevel} onChange={(e) => setNewLevel(e.target.value)}>
+            {EXPERIENCE_LEVELS.map((lvl) => (
+              <option key={lvl}>{lvl}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Resume content</span>
+          <textarea
+            rows={12}
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            placeholder="Paste your full resume text here..."
+          />
+        </label>
+        <button 
+          className="btn-primary" 
+          type="button"
+          onClick={handleCreateResume} 
+          disabled={!newContent.trim()}
         >
-          {PAGE_SIZES.map((p) => (
-            <option key={p}>{p}</option>
-          ))}
-        </select>
-      </label>
+          Save resume
+        </button>
+      </div>
     </div>
   );
 }

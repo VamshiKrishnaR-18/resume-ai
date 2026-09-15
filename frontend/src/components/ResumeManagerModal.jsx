@@ -14,36 +14,46 @@ export default function ResumeManagerModal({
   return (
     <div className="modal-overlay" onClick={() => setPicking(false)}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <button className="btn-link modal-close" onClick={() => setPicking(false)}>
+        <button className="btn-link modal-close" type="button" onClick={() => setPicking(false)}>
           ✕
         </button>
         <h2>Your resumes</h2>
-        <ul className="section-order-list">
-          {resumes.map((r) => (
-            <li key={r.id}>
-              <span className="section-name">{r.title}</span>
-              <span className="muted">{r.experience_level}</span>
-              <span className="row-actions">
-                <button
-                  className="btn-secondary"
-                  onClick={() => {
-                    setSelectedResumeId(r.id);
-                    setVersion(null);
-                    setPicking(false);
-                  }}
-                >
-                  Use
-                </button>
-                <button className="btn-link btn-danger" onClick={() => handleDeleteResume(r.id)}>
-                  Delete
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
+        
+        {resumes.length === 0 ? (
+          <p className="muted" style={{ marginBottom: 20 }}>No resumes found. Please add one to get started.</p>
+        ) : (
+          <ul className="section-order-list">
+            {resumes.map((r) => (
+              <li key={r.id}>
+                <span className="section-name">{r.title}</span>
+                <span className="muted">{r.experience_level}</span>
+                <span className="row-actions">
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    onClick={() => {
+                      setSelectedResumeId(r.id);
+                      setVersion(null);
+                      setPicking(false);
+                    }}
+                  >
+                    Use
+                  </button>
+                  <button className="btn-link btn-danger" type="button" onClick={() => handleDeleteResume(r.id)}>
+                    Delete
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <button
           className="btn-secondary"
-          onClick={() => {
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            console.log("Opening New Resume Modal!");
             setPicking(false);
             setShowNewResume(true);
           }}
