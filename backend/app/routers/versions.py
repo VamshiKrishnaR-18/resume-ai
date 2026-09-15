@@ -87,6 +87,8 @@ def generate_version(
         full_text = ""
 
         try:
+            is_gemini = (payload.provider == "gemini")
+            
             stream = tailor_resume(
                 resume_content=payload.resume_content,
                 job_description=payload.job_description,
@@ -94,12 +96,18 @@ def generate_version(
                 job_title=payload.job_title,
                 job_location=payload.job_location,
                 provider=payload.provider or "groq",
-                stream=True,
+                stream=not is_gemini,
             )
 
-            for chunk in stream:
-                full_text += chunk
-                yield chunk
+            
+
+            if is_gemini:
+                full_text = stream  # full response
+                yield full_text
+            else:
+                for chunk in stream:
+                    full_text += chunk
+                    yield chunk
 
             # ✅ ATS scoring
             ats = score_resume_against_job(full_text, payload.job_description)
