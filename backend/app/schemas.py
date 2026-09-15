@@ -97,12 +97,14 @@ class ResumeVersionOut(BaseModel):
     job_title: Optional[str]
     job_description: str
     model_used: str
-    tailored_content: str
+    tailored_content: Optional[str] = None
     ats_score: float
     matched_keywords: List[str]
     missing_keywords: List[str]
-    status: str
+    generation_status: Optional[str] = None
+    application_status: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     @classmethod
     def from_orm_obj(cls, obj):
@@ -118,8 +120,10 @@ class ResumeVersionOut(BaseModel):
             ats_score=obj.ats_score,
             matched_keywords=[k for k in (obj.matched_keywords or "").split(",") if k],
             missing_keywords=[k for k in (obj.missing_keywords or "").split(",") if k],
-            status=obj.status,
+            generation_status=getattr(obj, "generation_status", None),
+            application_status=getattr(obj, "application_status", None),
             created_at=obj.created_at,
+            updated_at=getattr(obj, "updated_at", None),
         )
 
 
@@ -134,7 +138,8 @@ class ResumeVersionListItem(BaseModel):
     job_location: Optional[str]
     job_description: str
     ats_score: float
-    status: str
+    generation_status: Optional[str] = None
+    application_status: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
