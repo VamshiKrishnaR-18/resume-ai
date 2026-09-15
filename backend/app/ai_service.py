@@ -10,21 +10,8 @@ logger = logging.getLogger("ai_service")
 logger.setLevel(logging.INFO)
 
 # -----------------------------
-# Prompt builders (kept simple)
+# Prompt builders
 # -----------------------------
-def _extract_keywords_prompt(job_description: str) -> str:
-    return f"""Extract the most important ATS keywords from this job description.
-
-Rules:
-- Return only comma-separated keywords
-- Focus on skills, tools, technologies, roles
-- No explanation
-
-JOB DESCRIPTION:
-{job_description}
-""".strip()
-
-
 def _build_user_prompt(
     resume_content: str,
     job_description: str,
@@ -33,10 +20,6 @@ def _build_user_prompt(
     job_title: str | None = None,
     job_location: str | None = None,
 ) -> str:
-    company = company_name or "Not provided"
-    title = job_title or "Not provided"
-    location = job_location or "Not provided"
-
     return f"""
 You are an expert resume writer and ATS optimization specialist.
 
@@ -49,14 +32,10 @@ Rules:
 4. Use ATS keywords only if present in resume.
 5. Keep it concise and professional.
 6. Return only the final resume.
-7. Do not include explanations.
 
-Additional focus keywords:
-{keywords}
-
-Company: {company}
-Job Title: {title}
-Job Location: {location}
+Company: {company_name or "Not provided"}
+Job Title: {job_title or "Not provided"}
+Location: {job_location or "Not provided"}
 
 ORIGINAL RESUME:
 {resume_content}
@@ -67,191 +46,120 @@ JOB DESCRIPTION:
 
 
 # -----------------------------
-# Provider wrappers (synchronous & streaming)
-# Each streaming function below yields text chunks (str)
+# GROQ
 # -----------------------------
-
 def _call_groq(prompt: str) -> str:
-    try:
-        from groq import Groq
-    except Exception as e:
-        raise RuntimeError("groq package not installed") from e
+    from groq import Groq
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise ValueError("Missing GROQ_API_KEY")
-
-    client = Groq(api_key=api_key)
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
     model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     res = client.chat.completions.create(
         model=model,
         messages=[
-            {"role": "system", "content": "Return only the final answer."},
+            {"role": "system", "content": "Return only final answer"},
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,
     )
 
-    content = res.choices[0].message.content or ""
-    if not content.strip():
-        raise RuntimeError("Groq returned empty response")
-    return content.strip()
+    return res.choices[0].message.content.strip()
 
 
 def _stream_groq(prompt: str) -> Iterator[str]:
-    """If Groq supports streaming in your setup, implement here.
-    Fallback to a single-block response if not available."""
-    text = _call_groq(prompt)
-    yield text
+    yield _call_groq(prompt)
+
+
+# -----------------------------
+# GEMINI (NEW SDK - FIXED)
+# -----------------------------
+def _get_gemini_client():
+    from google import genai
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 def _call_gemini(prompt: str) -> str:
-    # synchronous (non-stream) fallback
-    try:
-        import google.generativeai as genai
-    except Exception as e:
-        raise RuntimeError("Gemini client not available") from e
+    client = _get_gemini_client()
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("Missing GEMINI_API_KEY")
-
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
-
-    model = genai.GenerativeModel(
-        model_name=model_name,
-        system_instruction="Return only the final answer."
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config={"temperature": 0.3},
     )
 
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(temperature=0.3)
-    )
+    if not response.text:
+        raise RuntimeError("Empty Gemini response")
 
-    text = getattr(response, "text", None)
-    if not text:
-        raise RuntimeError("Gemini returned empty/blocked response")
-    return text.strip()
+    return response.text.strip()
 
 
 def _stream_gemini(prompt: str) -> Iterator[str]:
     """
-    Stream from Gemini safely. The `google.generativeai` package's streaming
-    interface may differ across versions. We wrap this and yield partial text
-    chunks. If streaming API is unavailable, fall back to single-block call.
+    🔥 FIXES YOUR ISSUE:
+    - Always yields something (prevents ERR_INCOMPLETE_CHUNKED_ENCODING)
+    - Never raises inside generator
+    - Handles empty chunks safely
     """
+
     try:
-        import google.generativeai as genai
-    except Exception:
-        # fall back to blocking call
-        logger.warning("Gemini client not available for streaming, using blocking call")
-        yield _call_gemini(prompt)
-        return
+        client = _get_gemini_client()
+        model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("Missing GEMINI_API_KEY")
+        stream = client.models.generate_content_stream(
+            model=model,
+            contents=prompt,
+            config={"temperature": 0.3},
+        )
 
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
+        sent_any = False
 
-    # TRY streaming interface if available (older/newer clients differ)
-    try:
-        # Some versions provide .stream() or .generate_stream()
-        stream = genai.generate_stream(model=model_name, prompt=prompt, temperature=0.3)
-    except Exception:
-        try:
-            # fallback: generate_content and yield whole text
-            text = _call_gemini(prompt)
-            yield text
-            return
-        except Exception as e:
-            logger.exception("Gemini fallback failed: %s", e)
-            raise
+        for chunk in stream:
+            text = getattr(chunk, "text", None)
+            if text:
+                sent_any = True
+                yield text
 
-    # If we have a stream-like generator
-    try:
-        buffer = ""
-        for event in stream:
-            # event may be dict-like; try to extract text pieces safely.
-            delta = None
-            if isinstance(event, dict):
-                # common field names in streaming events:
-                delta = event.get("text") or event.get("delta") or event.get("content")
-            else:
-                # sometimes event is an object with .text
-                delta = getattr(event, "text", None)
+        # ⚠️ CRITICAL: prevent broken HTTP stream
+        if not sent_any:
+            yield "\n[ERROR] Empty response from Gemini"
 
-            if not delta:
-                continue
-
-            buffer += delta
-            # yield in moderate chunks (every ~256 chars or break lines)
-            if len(buffer) > 256 or buffer.endswith("\n"):
-                yield buffer
-                buffer = ""
-
-        if buffer:
-            yield buffer
     except Exception as e:
-        logger.exception("Gemini streaming raised: %s", e)
-        # bubble up so router can mark failed
-        raise
+        logger.exception("Gemini streaming error: %s", e)
+
+        # ⚠️ NEVER RAISE inside streaming generator
+        yield "\n[ERROR] Gemini failed"
 
 
+# -----------------------------
+# OLLAMA
+# -----------------------------
 def _call_ollama(prompt: str) -> str:
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+    base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     model = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
-    try:
-        res = httpx.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.3},
-            },
-            timeout=300,
-        )
-        res.raise_for_status()
-    except Exception as e:
-        raise RuntimeError("Ollama request failed") from e
+    res = httpx.post(
+        f"{base}/api/generate",
+        json={
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.3},
+        },
+        timeout=300,
+    )
 
-    data = res.json()
-    output = data.get("response", "").strip()
-
-    if not output:
-        raise RuntimeError("Ollama returned empty response")
-
-    return output
+    res.raise_for_status()
+    return res.json()["response"].strip()
 
 
 def _stream_ollama(prompt: str) -> Iterator[str]:
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
-
-    try:
-        # Ollama supports streaming if stream=True and SSE-like responses; but not all setups do.
-        res = httpx.post(
-            f"{base_url}/api/generate",
-            json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0.3}},
-            timeout=300,
-        )
-        res.raise_for_status()
-        data = res.json()
-        yield data.get("response", "").strip()
-    except Exception as e:
-        logger.exception("Ollama streaming failed: %s", e)
-        raise
+    yield _call_ollama(prompt)
 
 
 # -----------------------------
-# Public: unified functions
+# MAIN ENTRY
 # -----------------------------
-
 def tailor_resume(
     resume_content: str,
     job_description: str,
@@ -261,31 +169,28 @@ def tailor_resume(
     provider: str = "groq",
     stream: bool = False,
 ):
-    """
-    If stream==False -> returns the full text (str).
-    If stream==True -> returns an iterator that yields chunks (Iterator[str]).
-    """
     prompt = _build_user_prompt(
-        resume_content=resume_content,
-        job_description=job_description,
-        keywords="",  # you may extract keywords beforehand if you wish
-        company_name=company_name,
-        job_title=job_title,
-        job_location=job_location,
+        resume_content,
+        job_description,
+        "",
+        company_name,
+        job_title,
+        job_location,
     )
 
-    provider = (provider or "groq").lower().strip()
+    provider = provider.lower().strip()
 
     if stream:
         if provider == "groq":
             return _stream_groq(prompt)
-        if provider in ("gemini", "google"):
+        elif provider in ("gemini", "google"):
             return _stream_gemini(prompt)
-        # ollama fallback
-        return _stream_ollama(prompt)
+        else:
+            return _stream_ollama(prompt)
     else:
         if provider == "groq":
             return _call_groq(prompt)
-        if provider in ("gemini", "google"):
+        elif provider in ("gemini", "google"):
             return _call_gemini(prompt)
-        return _call_ollama(prompt)
+        else:
+            return _call_ollama(prompt)
