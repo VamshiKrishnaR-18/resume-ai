@@ -22,10 +22,23 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    resumes = relationship("Resume", back_populates="owner", cascade="all, delete-orphan")
+    resumes = relationship(
+        "Resume",
+        back_populates="owner",
+        cascade="all, delete-orphan"
+    )
+
     settings = relationship(
-        "UserSettings", back_populates="owner",
-        uselist=False, cascade="all, delete-orphan"
+        "UserSettings",
+        back_populates="owner",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    # ✅ ensure versions also deleted if user deleted
+    versions = relationship(
+        "ResumeVersion",
+        cascade="all, delete-orphan"
     )
 
 
@@ -76,8 +89,10 @@ class Resume(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User", back_populates="resumes")
+
     versions = relationship(
-        "ResumeVersion", back_populates="resume",
+        "ResumeVersion",
+        back_populates="resume",
         cascade="all, delete-orphan"
     )
 
@@ -99,11 +114,11 @@ class ResumeVersion(Base):
 
     job_description = Column(Text, nullable=False)
 
-    # ✅ NEW (for retry)
-    original_resume = Column(Text)
+    # ✅ REQUIRED for retry
+    original_resume = Column(Text, nullable=False)
 
-    # ✅ allow NULL until AI finishes
-    tailored_content = Column(Text, nullable=True)
+    # ✅ streaming-safe
+    tailored_content = Column(Text, nullable=True, default="")
 
     model_used = Column(String, default="groq")
 
@@ -112,24 +127,27 @@ class ResumeVersion(Base):
     matched_keywords = Column(Text, default="")
     missing_keywords = Column(Text, default="")
 
-    # ✅ FIXED (separate states)
+    # generation lifecycle
     generation_status = Column(
         String,
         default="processing"  # processing | completed | failed
     )
 
+    # job tracking lifecycle
     application_status = Column(
         String,
         default="Not Applied"  # Not Applied | Applied | Interviewing | Rejected | Offer
     )
 
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     resume = relationship("Resume", back_populates="versions")
+    user = relationship("User")
 
-    # ✅ INDEX (important for performance)
     __table_args__ = (
         Index("idx_resume_user", "resume_id", "user_id"),
+        Index("idx_user_created", "user_id", "created_at"),
     )
 
 
@@ -146,4 +164,9 @@ class UsageLog(Base):
     action = Column(String, nullable=False)  # generate | pdf | docx
     success = Column(Boolean, default=True)
 
+    # ✅ FIXED (log should track creation time)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_usage_user_time", "user_id", "created_at"),
+    )

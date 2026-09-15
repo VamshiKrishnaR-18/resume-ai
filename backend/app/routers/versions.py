@@ -6,14 +6,14 @@ from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 
-from ..ai_service import tailor_resume
-from ..ats_service import score_resume_against_job
+from ..services.ai_service import tailor_resume
+from ..services.ats_service import score_resume_against_job
 
 router = APIRouter(prefix="/versions", tags=["versions"])
 
 
 # -----------------------------
-# Helper
+# Helpers
 # -----------------------------
 
 def _get_owned_version(db: Session, version_id: int, user: models.User):
@@ -25,11 +25,23 @@ def _get_owned_version(db: Session, version_id: int, user: models.User):
         )
         .first()
     )
-
     if not version:
         raise HTTPException(status_code=404, detail="Version not found")
-
     return version
+
+
+def _get_owned_resume(db: Session, resume_id: int, user: models.User):
+    resume = (
+        db.query(models.Resume)
+        .filter(
+            models.Resume.id == resume_id,
+            models.Resume.user_id == user.id
+        )
+        .first()
+    )
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return resume
 
 
 # -----------------------------
@@ -42,6 +54,14 @@ def generate_version(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    """
+    Create version → stream AI → store result
+    """
+
+    # ✅ Ensure resume belongs to user
+    _get_owned_resume(db, payload.resume_id, user)
+
+    # ✅ Create version row
     version = models.ResumeVersion(
         resume_id=payload.resume_id,
         user_id=user.id,
@@ -52,22 +72,27 @@ def generate_version(
         original_resume=payload.resume_content,
         generation_status="processing",
         application_status="Not Applied",
+        model_used=payload.provider or "groq",
     )
 
     db.add(version)
     db.commit()
     db.refresh(version)
 
+    # ⚠️ IMPORTANT: create new DB session inside stream
     def stream_and_store():
+        from ..database import SessionLocal
+        stream_db = SessionLocal()
+
         full_text = ""
 
         try:
             stream = tailor_resume(
-                payload.resume_content,
-                payload.job_description,
-                payload.company_name,
-                payload.job_title,
-                payload.job_location,
+                resume_content=payload.resume_content,
+                job_description=payload.job_description,
+                company_name=payload.company_name,
+                job_title=payload.job_title,
+                job_location=payload.job_location,
                 provider=payload.provider or "groq",
                 stream=True,
             )
@@ -76,28 +101,34 @@ def generate_version(
                 full_text += chunk
                 yield chunk
 
-            # ATS scoring
+            # ✅ ATS scoring
             ats = score_resume_against_job(full_text, payload.job_description)
 
-            version.tailored_content = full_text
-            version.ats_score = ats["score"]
-            version.matched_keywords = ", ".join(ats["matched"])
-            version.missing_keywords = ", ".join(ats["missing"])
-            version.model_used = payload.provider or "groq"
-            version.generation_status = "completed"
+            db_version = stream_db.query(models.ResumeVersion).get(version.id)
 
-            db.commit()
+            db_version.tailored_content = full_text
+            db_version.ats_score = ats["score"]
+            db_version.matched_keywords = ", ".join(ats["matched"])
+            db_version.missing_keywords = ", ".join(ats["missing"])
+            db_version.generation_status = "completed"
 
-        except Exception:
-            version.generation_status = "failed"
-            db.commit()
+            stream_db.commit()
+
+        except Exception as e:
+            db_version = stream_db.query(models.ResumeVersion).get(version.id)
+            db_version.generation_status = "failed"
+            stream_db.commit()
+
             yield "\n[ERROR] Generation failed"
+
+        finally:
+            stream_db.close()
 
     return StreamingResponse(stream_and_store(), media_type="text/plain")
 
 
 # -----------------------------
-# Version Listing
+# List Versions
 # -----------------------------
 
 @router.get("/resume/{resume_id}", response_model=list[schemas.ResumeVersionOut])
@@ -106,6 +137,8 @@ def list_versions(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    _get_owned_resume(db, resume_id, user)
+
     versions = (
         db.query(models.ResumeVersion)
         .filter(
@@ -142,7 +175,7 @@ def compare_versions(
             "id": v2.id,
             "score": v2.ats_score,
         },
-        "improvement": (v2.ats_score or 0) - (v1.ats_score or 0),
+        "improvement": round((v2.ats_score or 0) - (v1.ats_score or 0), 2),
     }
 
 
@@ -159,22 +192,29 @@ def retry_version(
     version = _get_owned_version(db, version_id, user)
 
     if version.generation_status != "failed":
-        raise HTTPException(status_code=400, detail="Only failed versions can be retried")
+        raise HTTPException(
+            status_code=400,
+            detail="Only failed versions can be retried"
+        )
 
     def stream_retry():
+        from ..database import SessionLocal
+        stream_db = SessionLocal()
+
         full_text = ""
 
         try:
-            version.generation_status = "processing"
-            db.commit()
+            db_version = stream_db.query(models.ResumeVersion).get(version.id)
+            db_version.generation_status = "processing"
+            stream_db.commit()
 
             stream = tailor_resume(
-                resume_content=version.original_resume,
-                job_description=version.job_description,
-                company_name=version.company_name,
-                job_title=version.job_title,
-                job_location=version.job_location,
-                provider="groq",
+                resume_content=db_version.original_resume,
+                job_description=db_version.job_description,
+                company_name=db_version.company_name,
+                job_title=db_version.job_title,
+                job_location=db_version.job_location,
+                provider=db_version.model_used or "groq",
                 stream=True,
             )
 
@@ -182,20 +222,25 @@ def retry_version(
                 full_text += chunk
                 yield chunk
 
-            ats = score_resume_against_job(full_text, version.job_description)
+            ats = score_resume_against_job(full_text, db_version.job_description)
 
-            version.tailored_content = full_text
-            version.ats_score = ats["score"]
-            version.matched_keywords = ", ".join(ats["matched"])
-            version.missing_keywords = ", ".join(ats["missing"])
-            version.generation_status = "completed"
+            db_version.tailored_content = full_text
+            db_version.ats_score = ats["score"]
+            db_version.matched_keywords = ", ".join(ats["matched"])
+            db_version.missing_keywords = ", ".join(ats["missing"])
+            db_version.generation_status = "completed"
 
-            db.commit()
+            stream_db.commit()
 
         except Exception:
-            version.generation_status = "failed"
-            db.commit()
+            db_version = stream_db.query(models.ResumeVersion).get(version.id)
+            db_version.generation_status = "failed"
+            stream_db.commit()
+
             yield "\n[ERROR] Retry failed"
+
+        finally:
+            stream_db.close()
 
     return StreamingResponse(stream_retry(), media_type="text/plain")
 
