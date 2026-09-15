@@ -5,11 +5,13 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
+import logging
 
 from ..ai_service import tailor_resume
 from ..ats_service import score_resume_against_job
 
 router = APIRouter(prefix="/versions", tags=["versions"])
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------
@@ -54,14 +56,8 @@ def generate_version(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    """
-    Create version → stream AI → store result
-    """
-
-    # ✅ Ensure resume belongs to user
     _get_owned_resume(db, payload.resume_id, user)
 
-    # ✅ Create version row
     version = models.ResumeVersion(
         resume_id=payload.resume_id,
         user_id=user.id,
@@ -79,7 +75,6 @@ def generate_version(
     db.commit()
     db.refresh(version)
 
-    # ⚠️ IMPORTANT: create new DB session inside stream
     def stream_and_store():
         from ..database import SessionLocal
         stream_db = SessionLocal()
@@ -87,32 +82,33 @@ def generate_version(
         full_text = ""
 
         try:
-            is_gemini = (payload.provider == "gemini")
-            
+            provider = (payload.provider or "groq").lower()
+
+            # ✅ ALWAYS use streaming (even for Gemini)
             stream = tailor_resume(
                 resume_content=payload.resume_content,
                 job_description=payload.job_description,
                 company_name=payload.company_name,
                 job_title=payload.job_title,
                 job_location=payload.job_location,
-                provider=payload.provider or "groq",
-                stream=not is_gemini,
+                provider=provider,
+                stream=True,   # 🔥 IMPORTANT FIX
             )
 
-            
+            for chunk in stream:
+                if not chunk:
+                    continue
+                full_text += chunk
+                yield chunk
 
-            if is_gemini:
-                full_text = stream  # full response
-                yield full_text
-            else:
-                for chunk in stream:
-                    full_text += chunk
-                    yield chunk
+            # ❌ If nothing came → force error
+            if not full_text.strip():
+                raise RuntimeError("Empty AI response")
 
             # ✅ ATS scoring
             ats = score_resume_against_job(full_text, payload.job_description)
 
-            db_version = stream_db.query(models.ResumeVersion).get(version.id)
+            db_version = stream_db.get(models.ResumeVersion, version.id)
 
             db_version.tailored_content = full_text
             db_version.ats_score = ats["score"]
@@ -122,18 +118,32 @@ def generate_version(
 
             stream_db.commit()
 
+
         except Exception as e:
-            db_version = stream_db.query(models.ResumeVersion).get(version.id)
-            db_version.generation_status = "failed"
-            stream_db.commit()
+            logger.exception("Generation failed: %s", e)
+
+            try:
+                db_version = stream_db.get(models.ResumeVersion, version.id)
+                if db_version:
+                    db_version.generation_status = "failed"
+                    stream_db.commit()
+            except Exception as db_err:
+                logger.exception("DB update failed: %s", db_err)
 
             yield "\n[ERROR] Generation failed"
 
         finally:
             stream_db.close()
 
-    return StreamingResponse(stream_and_store(), media_type="text/plain", headers={"X-Accel-Buffering": "no"})
-
+    return StreamingResponse(
+        stream_and_store(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 # -----------------------------
 # List Versions
