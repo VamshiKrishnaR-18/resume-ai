@@ -36,6 +36,15 @@ class Token(BaseModel):
     token_type: str = "bearer"
     user: UserOut
 
+class GenerateResumeRequest(BaseModel):
+    resume_id: int
+    resume_content: str
+    job_description: str
+    company_name: Optional[str] = None
+    job_title: Optional[str] = None
+    job_location: Optional[str] = None
+    provider: str = "groq"
+
 
 # ---------- Resumes ----------
 
