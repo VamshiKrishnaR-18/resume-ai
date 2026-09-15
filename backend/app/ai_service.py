@@ -70,12 +70,36 @@ def _stream_groq(prompt: str) -> Iterator[str]:
     yield _call_groq(prompt)
 
 
+#
+
 # -----------------------------
-# GEMINI (NEW SDK - FIXED)
+# GEMINI (NEW SDK - FINAL FIX)
 # -----------------------------
 def _get_gemini_client():
     from google import genai
     return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+
+def _extract_gemini_text(response) -> str | None:
+    """
+    Robust extractor for Gemini responses
+    """
+    try:
+        # ✅ Fast path
+        if hasattr(response, "text") and response.text:
+            return response.text.strip()
+
+        # ✅ Fallback (most reliable)
+        if hasattr(response, "candidates") and response.candidates:
+            parts = response.candidates[0].content.parts
+            texts = [p.text for p in parts if hasattr(p, "text") and p.text]
+            if texts:
+                return "".join(texts).strip()
+
+    except Exception as e:
+        logger.warning("Gemini text extraction failed: %s", e)
+
+    return None
 
 
 def _call_gemini(prompt: str) -> str:
@@ -88,23 +112,24 @@ def _call_gemini(prompt: str) -> str:
         config={"temperature": 0.3},
     )
 
-    if not response.text:
-        raise RuntimeError("Empty Gemini response")
+    text = _extract_gemini_text(response)
 
-    return response.text.strip()
+    if not text:
+        raise RuntimeError("Gemini returned empty response")
+
+    return text
 
 
 def _stream_gemini(prompt: str) -> Iterator[str]:
     """
-    🔥 FIXES YOUR ISSUE:
-    - Always yields something (prevents ERR_INCOMPLETE_CHUNKED_ENCODING)
-    - Never raises inside generator
-    - Handles empty chunks safely
+    Stable streaming:
+    - never crashes
+    - always yields something
     """
 
     try:
         client = _get_gemini_client()
-        model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
         stream = client.models.generate_content_stream(
             model=model,
@@ -116,20 +141,27 @@ def _stream_gemini(prompt: str) -> Iterator[str]:
 
         for chunk in stream:
             text = getattr(chunk, "text", None)
+
+            # fallback extraction per chunk
+            if not text and hasattr(chunk, "candidates"):
+                try:
+                    parts = chunk.candidates[0].content.parts
+                    text = "".join(
+                        [p.text for p in parts if hasattr(p, "text") and p.text]
+                    )
+                except Exception:
+                    text = None
+
             if text:
                 sent_any = True
                 yield text
 
-        # ⚠️ CRITICAL: prevent broken HTTP stream
         if not sent_any:
-            yield "\n[ERROR] Empty response from Gemini"
+            yield "\n[ERROR] Empty Gemini response"
 
     except Exception as e:
         logger.exception("Gemini streaming error: %s", e)
-
-        # ⚠️ NEVER RAISE inside streaming generator
         yield "\n[ERROR] Gemini failed"
-
 
 # -----------------------------
 # OLLAMA

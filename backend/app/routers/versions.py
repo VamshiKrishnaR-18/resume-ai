@@ -102,8 +102,9 @@ def generate_version(
                 yield chunk
 
             # ❌ If nothing came → force error
-            if not full_text.strip():
-                raise RuntimeError("Empty AI response")
+            
+            if "[ERROR]" in full_text:
+                raise RuntimeError("AI generation error")
 
             # ✅ ATS scoring
             ats = score_resume_against_job(full_text, payload.job_description)
@@ -222,7 +223,7 @@ def retry_version(
         full_text = ""
 
         try:
-            db_version = stream_db.query(models.ResumeVersion).get(version.id)
+            db_version = stream_db.get(models.ResumeVersion, version.id)
             db_version.generation_status = "processing"
             stream_db.commit()
 
@@ -237,6 +238,8 @@ def retry_version(
             )
 
             for chunk in stream:
+                if not chunk:
+                    continue
                 full_text += chunk
                 yield chunk
 
