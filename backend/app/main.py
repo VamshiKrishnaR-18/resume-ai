@@ -3,8 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import models
-from .database import engine, run_migrations
+from .database import init_db
 from .routers import (
     admin,
     auth_router,
@@ -16,16 +15,16 @@ from .routers import (
     versions,
 )
 
-models.Base.metadata.create_all(bind=engine)
-run_migrations()
-
 app = FastAPI(title="AI Resume Tailor API", version="1.1.0")
 
-# Local dev origins are always allowed. Add your deployed frontend origin
-# (e.g. your Elastic Beanstalk / CloudFront / Vercel URL) via the
-# CORS_ORIGINS env var, comma-separated, in backend/.env:
-#   CORS_ORIGINS=https://resume-ai-prod.eba-xxxx.us-east-1.elasticbeanstalk.com
-_extra_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+
+# -----------------------------
+# CORS CONFIG
+# -----------------------------
+
+_extra_origins = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +38,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# -----------------------------
+# ROUTERS
+# -----------------------------
+
 API_PREFIX = "/api"
 
 app.include_router(auth_router.router, prefix=API_PREFIX)
@@ -50,6 +54,20 @@ app.include_router(settings.router, prefix=API_PREFIX)
 app.include_router(dashboard.router, prefix=API_PREFIX)
 app.include_router(admin.router, prefix=API_PREFIX)
 
+
+# -----------------------------
+# HEALTH CHECK
+# -----------------------------
+
 @app.get("/")
 def health_check():
     return {"status": "ok", "service": "resume-tailor-api"}
+
+
+# -----------------------------
+# STARTUP EVENT (ONLY PLACE DB INIT HAPPENS)
+# -----------------------------
+
+@app.on_event("startup")
+def startup():
+    init_db()

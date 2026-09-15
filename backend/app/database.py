@@ -1,5 +1,4 @@
 import os
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -8,13 +7,31 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./resume_tailor.db")
 
-# check_same_thread is needed only for SQLite
+# -----------------------------
+# ENGINE SETUP
+# -----------------------------
+
+is_sqlite = DATABASE_URL.startswith("sqlite")
+
 engine = create_engine(
-    DATABASE_URL, connect_args={"check_same_thread": False}
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if is_sqlite else {},
+    pool_pre_ping=True,
+    **({} if is_sqlite else {"pool_size": 5, "max_overflow": 10})
 )
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
 Base = declarative_base()
 
+
+# -----------------------------
+# DB DEPENDENCY
+# -----------------------------
 
 def get_db():
     db = SessionLocal()
@@ -24,39 +41,62 @@ def get_db():
         db.close()
 
 
-# ---------------------------------------------------------------------------
-# Lightweight migrations
-#
-# Base.metadata.create_all() only creates tables that don't exist yet - it
-# never adds new columns to a table that's already there. Since this app
-# ships with an existing resume_tailor.db, new columns (experience_level,
-# template, is_admin) need to be added to that file in place. This is a
-# best-effort SQLite ALTER TABLE helper - safe to call on every startup.
-# For Postgres/MySQL in production, use a real migration tool (Alembic).
-# ---------------------------------------------------------------------------
+# -----------------------------
+# LIGHT MIGRATIONS (SQLite only)
+# -----------------------------
 
 _NEW_COLUMNS = [
+    # existing
     ("resumes", "experience_level", "VARCHAR DEFAULT 'Mid Level (3-5 yrs)'"),
     ("user_settings", "template", "VARCHAR DEFAULT 'Original'"),
     ("users", "is_admin", "BOOLEAN DEFAULT 0"),
+
+    # 🔥 NEW (IMPORTANT)
+    ("resume_versions", "original_resume", "TEXT"),
+    ("resume_versions", "generation_status", "VARCHAR DEFAULT 'processing'"),
+    ("resume_versions", "application_status", "VARCHAR DEFAULT 'Not Applied'"),
 ]
 
 
 def run_migrations():
-    if not DATABASE_URL.startswith("sqlite"):
-        # Non-SQLite deployments should manage schema changes explicitly.
+    """
+    Lightweight column migrations for SQLite only.
+    Safe to run at startup.
+    """
+    if not is_sqlite:
         return
 
-    with engine.connect() as conn:
+    print("🔄 Running SQLite migrations...")
+
+    with engine.begin() as conn:  # ✅ transaction-safe
         for table, column, ddl in _NEW_COLUMNS:
             try:
-                existing = [
-                    row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))
-                ]
-                if column not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-                    conn.commit()
-            except Exception:
-                # Table may not exist yet on a brand-new DB - create_all()
-                # handles that case, so it's safe to skip here.
-                conn.rollback()
+                result = conn.execute(text(f"PRAGMA table_info({table})"))
+                existing_cols = [row[1] for row in result]
+
+                if column not in existing_cols:
+                    print(f"➕ Adding column: {table}.{column}")
+                    conn.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+                    )
+
+            except Exception as e:
+                print(f"⚠️ Migration skipped for {table}.{column}: {e}")
+
+
+# -----------------------------
+# INIT DB
+# -----------------------------
+
+def init_db():
+    """
+    Call this once at app startup.
+    """
+    from . import models  # ensure models are loaded
+
+    print("📦 Creating tables if not exist...")
+    Base.metadata.create_all(bind=engine)
+
+    run_migrations()
+
+    print("✅ Database ready.")
