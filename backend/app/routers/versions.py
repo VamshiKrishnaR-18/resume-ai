@@ -6,8 +6,8 @@ from .. import models, schemas
 from ..auth import get_current_user
 from ..database import get_db
 
-from ..services.ai_service import tailor_resume
-from ..services.ats_service import score_resume_against_job
+from ..ai_service import tailor_resume
+from ..ats_service import score_resume_against_job
 
 router = APIRouter(prefix="/versions", tags=["versions"])
 
