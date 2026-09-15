@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+import io
+import PyPDF2
+import docx
 
 from .. import models, schemas
 from ..ai_service import tailor_resume
@@ -137,3 +140,34 @@ def list_versions(
         .order_by(models.ResumeVersion.created_at.desc())
         .all()
     )
+
+
+@router.post("/extract")
+async def extract_resume_text(
+    file: UploadFile = File(...),
+    user: models.User = Depends(get_current_user)
+):
+    content = await file.read()
+    ext = file.filename.split('.')[-1].lower()
+    extracted_text = ""
+
+    try:
+        if ext == "pdf":
+            pdf = PyPDF2.PdfReader(io.BytesIO(content))
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    extracted_text += page_text + "\n"
+                    
+        elif ext in ["doc", "docx"]:
+            doc = docx.Document(io.BytesIO(content))
+            for para in doc.paragraphs:
+                extracted_text += para.text + "\n"
+                
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file format.")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error extracting text: {str(e)}")
+
+    return {"text": extracted_text.strip()}

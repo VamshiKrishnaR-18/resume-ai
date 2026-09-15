@@ -45,6 +45,7 @@ def get_db():
 # LIGHT MIGRATIONS (SQLite only)
 # -----------------------------
 
+
 _NEW_COLUMNS = [
     # existing
     ("resumes", "experience_level", "VARCHAR DEFAULT 'Mid Level (3-5 yrs)'"),
@@ -55,6 +56,7 @@ _NEW_COLUMNS = [
     ("resume_versions", "original_resume", "TEXT"),
     ("resume_versions", "generation_status", "VARCHAR DEFAULT 'processing'"),
     ("resume_versions", "application_status", "VARCHAR DEFAULT 'Not Applied'"),
+    ("resume_versions", "updated_at", "DATETIME"),
 ]
 
 

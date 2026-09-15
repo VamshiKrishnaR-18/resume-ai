@@ -10,3 +10,6 @@ PyJWT>=2.9.0
 httpx
 groq
 google-generativeai
+python-multipart
+PyPDF2
+python-docx
