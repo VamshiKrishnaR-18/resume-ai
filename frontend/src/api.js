@@ -113,6 +113,24 @@ export const api = {
         experience_level: experienceLevel,
       }),
     }).then(handle),
+  
+  extractResume: async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/resumes/extract`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {}, // Do not set Content-Type for FormData!
+      body: formData,
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to extract text from file");
+    }
+
+    return res.json();
+  },
 
   deleteResume: (id) =>
     fetch(`${BASE_URL}/resumes/${id}`, {
@@ -124,11 +142,12 @@ export const api = {
   // 🚀 STREAMING GENERATION (CORE)
   // =============================
 
-  generateResumeStream: async (payload, onChunk) => {
+  generateResumeStream: async (payload, onChunk, signal) => {
     const res = await fetch(`${BASE_URL}/versions/generate`, {
       method: "POST",
       headers: jsonHeaders(),
       body: JSON.stringify(payload),
+      signal, // ✅ Pass the abort signal here!
     });
 
     if (!res.body) {
@@ -136,7 +155,8 @@ export const api = {
     }
 
     if (!res.ok) {
-      throw new Error("Failed to start generation");
+      const errorText = await res.text();
+      throw new Error(errorText || "Failed to start generation");
     }
 
     const reader = res.body.getReader();
@@ -144,14 +164,18 @@ export const api = {
 
     let fullText = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      fullText += chunk;
+        const chunk = decoder.decode(value, { stream: true });
+        fullText += chunk;
 
-      onChunk(chunk, fullText); // 🔥 LIVE UPDATE
+        onChunk(chunk, fullText);
+      }
+    } finally {
+      reader.releaseLock();
     }
 
     return fullText;
@@ -159,7 +183,7 @@ export const api = {
 
 
   retryVersionStream: async (versionId, onChunk) => {
-  const res = await fetch(`/api/versions/${versionId}/retry`, {
+  const res = await fetch(`${BASE_URL}/versions/${versionId}/retry`, {
     method: "POST",
     headers: authHeaders(),
   });
